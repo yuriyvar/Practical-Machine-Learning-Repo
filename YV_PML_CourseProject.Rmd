@@ -1,0 +1,107 @@
+---
+title: Practical Machine Learning, Course Project. 
+        Analyzing Quantified Self Movement - a Groupware Project.
+author: "Yuriy Varvashenya"
+date: "January 31, 2016"
+output:
+  html_document:
+    fig_height: 9
+    fig_width: 9
+---
+
+## Introduction  
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. A group of enthusiasts measured their activities regularly using those electronic devices. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways. These athletes recorded plenty of data about a particular activity they do, but they rarely quantify how well they do it.  
+
+We sourced the data collected from accelerometers worn on the belt, forearm, arm, and dumbbell by 6 participants and it is the subject of predictive analysis performed below. 
+
+## Data Preprocessing  
+```{r, cache = TRUE, echo = FALSE, warning = FALSE, message = FALSE}
+
+suppressWarnings(library(caret))
+suppressWarnings(library(rpart))
+suppressWarnings(library(rpart.plot))
+suppressWarnings(library(randomForest))
+suppressWarnings(library(rattle))
+
+```
+### Origin of the Data. The raw dataset for this exercise is downloaded from Human Activity Recognition (HAR) project, a [Groupware project (click to be redirected to the URL)](http://groupware.les.inf.puc-rio.br/har).  
+
+### Downloading the source files and reading into data frames...  
+
+```{r, eval = FALSE, cache = FALSE, echo = TRUE, warning = FALSE}
+train_Base <- read.csv("https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv", na.strings=c("NA","#DIV/0!",""))
+test_Base <- read.csv("https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv", na.strings=c("NA","#DIV/0!",""))
+```
+The initial training data set contains `r nrow(train_Base) ` observations and `r ncol(train_Base) ` variables, while the testing data set contains `r nrow(test_Base) ` observations and `r ncol(test_Base) ` variables. The "classe" variable in the training set is the outcome to predict. 
+
+### Data Cleaning
+In the next section missing values `NA`'s are removed from our data sets; initially, the columns containing missing values will be removed and then the columns that are irrelevant for our predictors (*like timestamps and windows*) will be dropped. Also, column *problem_id* is removed from the training file.  
+
+```{r, cache = T, echo = F}
+train_Base <- train_Base[, colSums(is.na(train_Base)) == 0]
+test_Base <- test_Base[, colSums(is.na(test_Base)) == 0] 
+train_Base <- train_Base[,!grepl("^X|wind|_time", names(train_Base))]
+test_Base <- test_Base[,!grepl("^X|wind|_time|problem_", names(test_Base))]
+```
+
+####Normalizing the data  
+by bringing the data sets to a common (*numeric*) data type and thus removing more  variables unrelated to the accelerometer measurements are; only the columns containing numeric data will remain(*also, making sure that `classe` column is preserved*).  
+```{r, cache = T, echo = F}
+train_Base <- cbind(train_Base[, sapply(train_Base[c(-ncol(train_Base))], is.numeric)], train_Base[c(ncol(train_Base))])
+test_Base <- test_Base[, sapply(test_Base, is.numeric)]
+```
+Now, the coerced data sets, each containing `r ncol(test_Base) ` variables, will be used to build predictors based on cleaned `training` and `testing` data sets, having `r nrow(train_Base) ` and  `r nrow(train_Base) ` observations respectively. 
+
+In the following section the initial Training data set will be split into sub-data sets (sub-Training and sub-Testing) for cross-validation of our base data. The split will be __70/30__ respectively from the final `train_Base` data set on aforementioned `classe` column.  
+
+```{r, cache = T}
+set.seed(15243) # To ensure the results are consistent over multiple trials
+inTrain <- createDataPartition(train_Base$classe, p=0.7, list=FALSE)
+training <- train_Base[inTrain, ]
+testing <- train_Base[-inTrain, ]
+```
+
+### Modeling predictors  
+*__Decision Tree__* algorithm is used next to predict using `testing` data set.    
+```{r, cache = T}
+modFitDT <- rpart(classe ~ ., data=training, method="class")
+predDT <- predict(modFitDT, testing, type = "class")
+cnfMtrDT <- confusionMatrix(predDT, testing$classe)
+cnfMtrDT
+```
+
+#### Figure 1. Decision Tree Visualization    
+This is how predicted Classification Tree looks like:  
+```{r, cache = T, warning = FALSE, echo=FALSE}
+fancyRpartPlot(modFitDT,main="Classification Tree", sub = "Machine Learning: Final Project, Decision Trees", cex = .1)
+```
+
+This __Classification Tree__ algorithm has the accuracy of `r  round(cnfMtrDT$overall[1]*100,digits=2)`%. Not too exciting...   
+
+#### Further, a *5-fold cross validation* in the __Random Forest__ model fit wil be implemented - 
+by the number of factors in `classe` variable. The assumption that this predictor will outperform the previous __Decision Tree__ predictor.  
+
+```{r, cache = T}
+# Building the Random Forest predictor using testing data set
+ctrlRF <- trainControl(method="cv", length(levels(testing$classe)))
+modFitRF <- train(classe ~ ., data = training, method="rf", trControl = ctrlRF, ntree=250)
+```
+  
+#### Finally, we evaluate the *Random Forest* predictor on the validation (`testing`) data set.  
+
+```{r, cache = T, , echo = T}
+predRF <- predict(modFitRF, testing)
+cnfMtrRF <- confusionMatrix(testing$classe, predRF)
+cnfMtrRF
+```
+
+The Est. accuracy of the Random Forest prediction model is `r  round(cnfMtrRF$overall[1]*100,digits=2)`% with the Est. Out of sample Error `r  round(100*(1-cnfMtrRF$overall[1]),digits=2)`%. The __Random Forest__ predictor, as expected, outperforms other predictors (in this exercise the *Classification Decision tree*) and yields a much better in-sample prediction.
+
+### Predicting for the original Test Data Set (`test_Base`)
+Now, we apply the model to the original testing data set downloaded from the data source and cleaned to run this test.  
+
+```{r, cache = T, echo = T}
+Testresult <- predict(modFitRF, test_Base)
+#Predicted values for Test submission.
+Testresult
+```  
